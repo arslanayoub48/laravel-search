@@ -1,0 +1,20 @@
+{
+    "name": "arslanayoub/searchable-scope",
+    "description": "Reusable search scope trait for Laravel models with nested relation and priority support.",
+    "type": "library",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "ArslanAyoub\\SearchableScope\\": "src/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "ArslanAyoub\\SearchableScope\\SearchableScopeServiceProvider"
+            ]
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}
