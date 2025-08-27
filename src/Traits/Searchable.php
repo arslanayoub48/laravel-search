@@ -87,18 +87,16 @@ trait Searchable
     $query->where(function ($query) use ($finalColumns, $finalRelations, $searchTerm, $operator, $caseSensitive) {
       // Search in columns
       if (!empty($finalColumns)) {
-        $query->where(function ($columnQuery) use ($finalColumns, $searchTerm, $operator, $caseSensitive) {
-          foreach ($finalColumns as $column) {
-            $value = $caseSensitive ? $searchTerm : strtolower($searchTerm);
-            if (!$caseSensitive) {
-              $columnQuery->orWhereRaw('LOWER(' . $column . ') ' . $operator . ' ?', [
-                $operator === 'LIKE' ? "%{$value}%" : $value
-              ]);
-            } else {
-              $columnQuery->orWhere($column, $operator, $operator === 'LIKE' ? "%{$value}%" : $value);
-            }
+        foreach ($finalColumns as $column) {
+          $value = $caseSensitive ? $searchTerm : strtolower($searchTerm);
+          if (!$caseSensitive) {
+            $query->orWhereRaw('LOWER(' . $column . ') ' . $operator . ' ?', [
+              $operator === 'LIKE' ? "%{$value}%" : $value
+            ]);
+          } else {
+            $query->orWhere($column, $operator, $operator === 'LIKE' ? "%{$value}%" : $value);
           }
-        });
+        }
       }
 
       // Search in relations
@@ -125,8 +123,24 @@ trait Searchable
     // Debug: Log the final SQL query
     Log::info('Final SQL query', [
       'sql' => $query->toSql(),
-      'bindings' => $query->getBindings()
+      'bindings' => $query->getBindings(),
+      'searchTerm' => $searchTerm,
+      'finalColumns' => $finalColumns,
+      'finalRelations' => $finalRelations
     ]);
+
+    // Also log the raw query for debugging
+    try {
+      $rawQuery = $query->toSql();
+      $bindings = $query->getBindings();
+      Log::info('Raw query debug', [
+        'raw_sql' => $rawQuery,
+        'bindings' => $bindings,
+        'searchTerm' => $searchTerm
+      ]);
+    } catch (\Exception $e) {
+      Log::error('Error getting raw query', ['error' => $e->getMessage()]);
+    }
 
     return $query;
   }
