@@ -39,19 +39,7 @@ trait Searchable
     $configColumns = Config::get('searchable-scope.default_columns', []);
     $configRelations = Config::get('searchable-scope.default_relations', []);
 
-    // Debug logging
-    Log::info('Searchable trait debug', [
-      'searchTerm' => $searchTerm,
-      'priority' => $priority,
-      'modelColumns' => $modelColumns,
-      'modelRelations' => $modelRelations,
-      'configColumns' => $configColumns,
-      'configRelations' => $configRelations,
-      'columns' => $columns,
-      'relations' => $relations
-    ]);
-
-    // Strict priority resolution
+    // Priority resolution
     switch ($priority) {
       case 'model':
         $finalColumns = $modelColumns;
@@ -68,42 +56,21 @@ trait Searchable
         break;
     }
 
-    // Sort associative priority columns (optional)
-    $finalColumns = collect($finalColumns)
-      ->when(
-        collect($finalColumns)->keys()->first() !== 0,
-        fn($col) => $col->sortBy(fn($priority) => $priority)
-      )
-      ->map(fn($priority, $column) => is_string($priority) ? $priority : $column)
-      ->values()
-      ->all();
+    // Process columns - extract column names from priority arrays
+    $finalColumns = $this->processPriorityArray($finalColumns);
 
-    // Store original relations for debugging
-    $originalRelations = $finalRelations;
-    
-    // Fix: Process relationship columns properly - extract column names from priority arrays
-    $processedRelations = [];
-    foreach ($finalRelations as $relationPath => $relationColumns) {
-      if (is_array($relationColumns)) {
-        $processedRelations[$relationPath] = collect($relationColumns)
-          ->when(
-            collect($relationColumns)->keys()->first() !== 0,
-            fn($cols) => $cols->sortBy(fn($priority) => $priority)
-          )
-          ->map(fn($priority, $column) => is_string($priority) ? $priority : $column)
-          ->values()
-          ->all();
-      } else {
-        $processedRelations[$relationPath] = $relationColumns;
-      }
+    // Process relations - extract column names from priority arrays
+    $finalRelations = $this->processRelationsArray($finalRelations);
+
+    // Debug logging (only if enabled)
+    if (Config::get('searchable-scope.debug', false)) {
+      Log::info('Searchable trait debug', [
+        'searchTerm' => $searchTerm,
+        'priority' => $priority,
+        'finalColumns' => $finalColumns,
+        'finalRelations' => $finalRelations
+      ]);
     }
-    $finalRelations = $processedRelations;
-
-    Log::info('Final search configuration', [
-      'finalColumns' => $finalColumns,
-      'finalRelations' => $finalRelations,
-      'originalRelations' => $originalRelations
-    ]);
 
     // Apply search
     $query->where(function ($query) use ($finalColumns, $finalRelations, $searchTerm, $operator, $caseSensitive) {
@@ -121,19 +88,9 @@ trait Searchable
         }
       }
 
-      // Search in relations - Simplified approach
+      // Search in relations
       if (!empty($finalRelations)) {
-        Log::info('Processing relations search', [
-          'relations' => $finalRelations,
-          'searchTerm' => $searchTerm
-        ]);
-        
         foreach ($finalRelations as $relationPath => $relationColumns) {
-          Log::info('Processing relation', [
-            'relationPath' => $relationPath,
-            'relationColumns' => $relationColumns
-          ]);
-          
           $query->orWhereHas($relationPath, function ($relationQuery) use ($relationColumns, $searchTerm, $operator, $caseSensitive) {
             foreach ($relationColumns as $column) {
               $value = $caseSensitive ? $searchTerm : strtolower($searchTerm);
@@ -150,28 +107,65 @@ trait Searchable
       }
     });
 
-    // Debug: Log the final SQL query
-    Log::info('Final SQL query', [
-      'sql' => $query->toSql(),
-      'bindings' => $query->getBindings(),
-      'searchTerm' => $searchTerm,
-      'finalColumns' => $finalColumns,
-      'finalRelations' => $finalRelations
-    ]);
-
-    // Also log the raw query for debugging
-    try {
-      $rawQuery = $query->toSql();
-      $bindings = $query->getBindings();
-      Log::info('Raw query debug', [
-        'raw_sql' => $rawQuery,
-        'bindings' => $bindings,
+    // Debug logging (only if enabled)
+    if (Config::get('searchable-scope.debug', false)) {
+      Log::info('Final SQL query', [
+        'sql' => $query->toSql(),
+        'bindings' => $query->getBindings(),
         'searchTerm' => $searchTerm
       ]);
-    } catch (\Exception $e) {
-      Log::error('Error getting raw query', ['error' => $e->getMessage()]);
     }
 
     return $query;
+  }
+
+  /**
+   * Process priority array to extract column names
+   *
+   * @param array $array
+   * @return array
+   */
+  private function processPriorityArray(array $array): array
+  {
+    if (empty($array)) {
+      return [];
+    }
+
+    // Check if this is a priority array (has numeric keys)
+    $firstKey = array_key_first($array);
+    if (is_numeric($firstKey)) {
+      // Simple array, return as is
+      return $array;
+    }
+
+    // Priority array, sort by priority and extract column names
+    asort($array); // Sort by priority (value)
+    $result = [];
+    foreach ($array as $column => $priority) {
+      $result[] = $column;
+    }
+    
+    return $result;
+  }
+
+  /**
+   * Process relations array to extract column names
+   *
+   * @param array $relations
+   * @return array
+   */
+  private function processRelationsArray(array $relations): array
+  {
+    $processed = [];
+    
+    foreach ($relations as $relationPath => $relationColumns) {
+      if (is_array($relationColumns)) {
+        $processed[$relationPath] = $this->processPriorityArray($relationColumns);
+      } else {
+        $processed[$relationPath] = [$relationColumns];
+      }
+    }
+    
+    return $processed;
   }
 } 
