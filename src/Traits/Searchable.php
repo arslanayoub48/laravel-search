@@ -78,9 +78,31 @@ trait Searchable
       ->values()
       ->all();
 
+    // Store original relations for debugging
+    $originalRelations = $finalRelations;
+    
+    // Fix: Process relationship columns properly - extract column names from priority arrays
+    $processedRelations = [];
+    foreach ($finalRelations as $relationPath => $relationColumns) {
+      if (is_array($relationColumns)) {
+        $processedRelations[$relationPath] = collect($relationColumns)
+          ->when(
+            collect($relationColumns)->keys()->first() !== 0,
+            fn($cols) => $cols->sortBy(fn($priority) => $priority)
+          )
+          ->map(fn($priority, $column) => is_string($priority) ? $priority : $column)
+          ->values()
+          ->all();
+      } else {
+        $processedRelations[$relationPath] = $relationColumns;
+      }
+    }
+    $finalRelations = $processedRelations;
+
     Log::info('Final search configuration', [
       'finalColumns' => $finalColumns,
-      'finalRelations' => $finalRelations
+      'finalRelations' => $finalRelations,
+      'originalRelations' => $originalRelations
     ]);
 
     // Apply search
@@ -99,22 +121,30 @@ trait Searchable
         }
       }
 
-      // Search in relations
+      // Search in relations - Simplified approach
       if (!empty($finalRelations)) {
+        Log::info('Processing relations search', [
+          'relations' => $finalRelations,
+          'searchTerm' => $searchTerm
+        ]);
+        
         foreach ($finalRelations as $relationPath => $relationColumns) {
+          Log::info('Processing relation', [
+            'relationPath' => $relationPath,
+            'relationColumns' => $relationColumns
+          ]);
+          
           $query->orWhereHas($relationPath, function ($relationQuery) use ($relationColumns, $searchTerm, $operator, $caseSensitive) {
-            $relationQuery->where(function ($nestedQuery) use ($relationColumns, $searchTerm, $operator, $caseSensitive) {
-              foreach ($relationColumns as $column) {
-                $value = $caseSensitive ? $searchTerm : strtolower($searchTerm);
-                if (!$caseSensitive) {
-                  $nestedQuery->orWhereRaw('LOWER(' . $column . ') ' . $operator . ' ?', [
-                    $operator === 'LIKE' ? "%{$value}%" : $value
-                  ]);
-                } else {
-                  $nestedQuery->orWhere($column, $operator, $operator === 'LIKE' ? "%{$value}%" : $value);
-                }
+            foreach ($relationColumns as $column) {
+              $value = $caseSensitive ? $searchTerm : strtolower($searchTerm);
+              if (!$caseSensitive) {
+                $relationQuery->orWhereRaw('LOWER(' . $column . ') ' . $operator . ' ?', [
+                  $operator === 'LIKE' ? "%{$value}%" : $value
+                ]);
+              } else {
+                $relationQuery->orWhere($column, $operator, $operator === 'LIKE' ? "%{$value}%" : $value);
               }
-            });
+            }
           });
         }
       }
