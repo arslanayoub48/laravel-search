@@ -4,6 +4,7 @@ namespace ArslanAyoub\SearchableScope\Traits;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Log;
 
 trait Searchable
 {
@@ -38,6 +39,18 @@ trait Searchable
     $configColumns = Config::get('searchable-scope.default_columns', []);
     $configRelations = Config::get('searchable-scope.default_relations', []);
 
+    // Debug logging
+    Log::info('Searchable trait debug', [
+      'searchTerm' => $searchTerm,
+      'priority' => $priority,
+      'modelColumns' => $modelColumns,
+      'modelRelations' => $modelRelations,
+      'configColumns' => $configColumns,
+      'configRelations' => $configRelations,
+      'columns' => $columns,
+      'relations' => $relations
+    ]);
+
     // Strict priority resolution
     switch ($priority) {
       case 'model':
@@ -65,36 +78,55 @@ trait Searchable
       ->values()
       ->all();
 
+    Log::info('Final search configuration', [
+      'finalColumns' => $finalColumns,
+      'finalRelations' => $finalRelations
+    ]);
+
     // Apply search
     $query->where(function ($query) use ($finalColumns, $finalRelations, $searchTerm, $operator, $caseSensitive) {
-      foreach ($finalColumns as $column) {
-        $value = $caseSensitive ? $searchTerm : strtolower($searchTerm);
-        if (!$caseSensitive) {
-          $query->orWhereRaw('LOWER(' . $column . ') ' . $operator . ' ?', [
-            $operator === 'LIKE' ? "%{$value}%" : $value
-          ]);
-        } else {
-          $query->orWhere($column, $operator, $operator === 'LIKE' ? "%{$value}%" : $value);
-        }
-      }
-
-      foreach ($finalRelations as $relationPath => $relationColumns) {
-        $query->orWhereHas($relationPath, function ($relationQuery) use ($relationColumns, $searchTerm, $operator, $caseSensitive) {
-          $relationQuery->where(function ($nestedQuery) use ($relationColumns, $searchTerm, $operator, $caseSensitive) {
-            foreach ($relationColumns as $column) {
-              $value = $caseSensitive ? $searchTerm : strtolower($searchTerm);
-              if (!$caseSensitive) {
-                $nestedQuery->orWhereRaw('LOWER(' . $column . ') ' . $operator . ' ?', [
-                  $operator === 'LIKE' ? "%{$value}%" : $value
-                ]);
-              } else {
-                $nestedQuery->orWhere($column, $operator, $operator === 'LIKE' ? "%{$value}%" : $value);
-              }
+      // Search in columns
+      if (!empty($finalColumns)) {
+        $query->where(function ($columnQuery) use ($finalColumns, $searchTerm, $operator, $caseSensitive) {
+          foreach ($finalColumns as $column) {
+            $value = $caseSensitive ? $searchTerm : strtolower($searchTerm);
+            if (!$caseSensitive) {
+              $columnQuery->orWhereRaw('LOWER(' . $column . ') ' . $operator . ' ?', [
+                $operator === 'LIKE' ? "%{$value}%" : $value
+              ]);
+            } else {
+              $columnQuery->orWhere($column, $operator, $operator === 'LIKE' ? "%{$value}%" : $value);
             }
-          });
+          }
         });
       }
+
+      // Search in relations
+      if (!empty($finalRelations)) {
+        foreach ($finalRelations as $relationPath => $relationColumns) {
+          $query->orWhereHas($relationPath, function ($relationQuery) use ($relationColumns, $searchTerm, $operator, $caseSensitive) {
+            $relationQuery->where(function ($nestedQuery) use ($relationColumns, $searchTerm, $operator, $caseSensitive) {
+              foreach ($relationColumns as $column) {
+                $value = $caseSensitive ? $searchTerm : strtolower($searchTerm);
+                if (!$caseSensitive) {
+                  $nestedQuery->orWhereRaw('LOWER(' . $column . ') ' . $operator . ' ?', [
+                    $operator === 'LIKE' ? "%{$value}%" : $value
+                  ]);
+                } else {
+                  $nestedQuery->orWhere($column, $operator, $operator === 'LIKE' ? "%{$value}%" : $value);
+                }
+              }
+            });
+          });
+        }
+      }
     });
+
+    // Debug: Log the final SQL query
+    Log::info('Final SQL query', [
+      'sql' => $query->toSql(),
+      'bindings' => $query->getBindings()
+    ]);
 
     return $query;
   }
