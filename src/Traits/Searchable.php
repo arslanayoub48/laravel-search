@@ -92,16 +92,18 @@ trait Searchable
       if (!empty($finalRelations)) {
         foreach ($finalRelations as $relationPath => $relationColumns) {
           $query->orWhereHas($relationPath, function ($relationQuery) use ($relationColumns, $searchTerm, $operator, $caseSensitive) {
-            foreach ($relationColumns as $column) {
-              $value = $caseSensitive ? $searchTerm : strtolower($searchTerm);
-              if (!$caseSensitive) {
-                $relationQuery->orWhereRaw('LOWER(' . $column . ') ' . $operator . ' ?', [
-                  $operator === 'LIKE' ? "%{$value}%" : $value
-                ]);
-              } else {
-                $relationQuery->orWhere($column, $operator, $operator === 'LIKE' ? "%{$value}%" : $value);
+            $relationQuery->where(function ($nestedQuery) use ($relationColumns, $searchTerm, $operator, $caseSensitive) {
+              foreach ($relationColumns as $column) {
+                $value = $caseSensitive ? $searchTerm : strtolower($searchTerm);
+                if (!$caseSensitive) {
+                  $nestedQuery->orWhereRaw('LOWER(' . $column . ') ' . $operator . ' ?', [
+                    $operator === 'LIKE' ? "%{$value}%" : $value
+                  ]);
+                } else {
+                  $nestedQuery->orWhere($column, $operator, $operator === 'LIKE' ? "%{$value}%" : $value);
+                }
               }
-            }
+            });
           });
         }
       }
@@ -112,8 +114,32 @@ trait Searchable
       Log::info('Final SQL query', [
         'sql' => $query->toSql(),
         'bindings' => $query->getBindings(),
-        'searchTerm' => $searchTerm
+        'searchTerm' => $searchTerm,
+        'finalColumns' => $finalColumns,
+        'finalRelations' => $finalRelations
       ]);
+      
+      // Also log the raw query structure for debugging
+      try {
+        $rawQuery = $query->toSql();
+        $bindings = $query->getBindings();
+        
+        // Count the number of bindings to verify structure
+        $bindingCount = count($bindings);
+        $expectedBindings = count($finalColumns) + array_sum(array_map('count', $finalRelations));
+        
+        Log::info('SQL Structure Analysis', [
+          'raw_sql' => $rawQuery,
+          'bindings' => $bindings,
+          'binding_count' => $bindingCount,
+          'expected_bindings' => $expectedBindings,
+          'searchTerm' => $searchTerm,
+          'finalColumns_count' => count($finalColumns),
+          'finalRelations_count' => count($finalRelations)
+        ]);
+      } catch (\Exception $e) {
+        Log::error('Error analyzing SQL structure', ['error' => $e->getMessage()]);
+      }
     }
 
     return $query;
